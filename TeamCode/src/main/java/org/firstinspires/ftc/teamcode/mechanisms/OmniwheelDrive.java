@@ -1,7 +1,10 @@
 package org.firstinspires.ftc.teamcode.mechanisms;
 
+import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.HardwareMap;
+import com.qualcomm.robotcore.hardware.IMU;
+import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 
 /**
  * A mechanism class for an omniwheel drivetrain (also known as Mecanum).
@@ -14,13 +17,14 @@ public class OmniwheelDrive {
     private DcMotor left_back = null;
     private DcMotor right_front = null;
     private DcMotor right_back = null;
+    private IMU imu = null;
 
     public OmniwheelDrive() {
         // Default constructor
     }
 
     /**
-     * Initializes the drivetrain motors.
+     * Initializes the drivetrain motors and IMU.
      * @param hwMap The HardwareMap from the OpMode.
      */
     public void init(HardwareMap hwMap) {
@@ -29,6 +33,16 @@ public class OmniwheelDrive {
         left_back = hwMap.get(DcMotor.class, "left_back");
         right_front = hwMap.get(DcMotor.class, "right_front");
         right_back = hwMap.get(DcMotor.class, "right_back");
+
+        // Initialize the IMU assuming the hardware map name is "imu"
+        imu = hwMap.get(IMU.class, "imu");
+        // Adjust the orientation parameters to match your robot
+        IMU.Parameters parameters = new IMU.Parameters(new RevHubOrientationOnRobot(
+                RevHubOrientationOnRobot.LogoFacingDirection.UP,
+                RevHubOrientationOnRobot.UsbFacingDirection.FORWARD
+        ));
+        // Without this, the REV Hub's orientation is assumed to be logo up / USB forward
+        imu.initialize(parameters);
 
         // Set motor directions: This is a crucial step and needs to be correct for Mecanum drive.
         // Assuming a standard configuration where left side is reversed for forward motion.
@@ -98,6 +112,32 @@ public class OmniwheelDrive {
         right_front.setPower(frontRightPower);
         left_back.setPower(backLeftPower);
         right_back.setPower(backRightPower);
+    }
+
+    /**
+     * Implements field-relative omniwheel (Mecanum) drive movement using the IMU.
+     * @param forward Backward/Forward power (Y axis on the joystick).
+     * @param strafe Left/Right strafing power (X axis on the joystick).
+     * @param rotation Clockwise/Counter-clockwise rotation power.
+     */
+    public void driveRelativeField(double forward, double strafe, double rotation) {
+        double botHeading = imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS);
+
+        // Rotate the movement vector by the bot's heading
+        double robotStrafe = strafe * Math.cos(botHeading) + forward * Math.sin(botHeading);
+        double robotForward = -strafe * Math.sin(botHeading) + forward * Math.cos(botHeading);
+
+        // Now, drive the robot using the robot-centric values
+        drive(robotForward, robotStrafe, rotation);
+    }
+
+    /**
+     * Resets the IMU's yaw angle to zero. This is useful for setting the robot's "forward" direction.
+     */
+    public void resetIMU() {
+        if (imu != null) {
+            imu.resetYaw();
+        }
     }
 
     /**
