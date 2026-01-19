@@ -22,11 +22,10 @@ public class Intake {
         // Initialize motor using the variable name as the hardware map name.
         intake_front = hwMap.get(DcMotor.class, "intake_front");
 
-        // Set motor direction: This might need adjustment based on the physical mechanism.
-        // Assuming FORWARD direction pulls material IN.
-        intake_front.setDirection(DcMotor.Direction.FORWARD);
+        // Set motor direction based on the user's latest configuration.
+        intake_front.setDirection(DcMotor.Direction.REVERSE);
 
-        // Set motor zero power behavior to BRAKE
+        // Set motor zero power behavior to BRAKE (assuming default, no change requested)
         intake_front.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
 
         // Set motor mode to RUN_WITHOUT_ENCODER for simple speed control
@@ -35,6 +34,7 @@ public class Intake {
 
     /**
      * Sets the power for the intake motor to pull material IN.
+     * With REVERSE direction, positive power (in()) should now pull material in.
      * @param power The power (from 0.0 to 1.0) to run the intake.
      */
     public void in(double power) {
@@ -44,6 +44,7 @@ public class Intake {
 
     /**
      * Sets the power for the intake motor to push material OUT (eject).
+     * With REVERSE direction, negative power (out()) should now push material out.
      * @param power The power (from 0.0 to 1.0) to run the intake.
      */
     public void out(double power) {

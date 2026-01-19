@@ -29,13 +29,11 @@ public class Lift {
         right_lift = hwMap.get(DcMotor.class, "right_lift");
         left_lift = hwMap.get(DcMotor.class, "left_lift");
 
-        // Set motor directions: This is crucial. Typically, one motor must be reversed
-        // so that they both pull (or push) in the same physical direction.
-        // **These directions may need adjustment based on physical setup!**
-        right_lift.setDirection(DcMotor.Direction.FORWARD);
+        // Set motor directions based on the user's latest configuration:
+        right_lift.setDirection(DcMotor.Direction.REVERSE);
         left_lift.setDirection(DcMotor.Direction.REVERSE); 
 
-        // Set motor zero power behavior to BRAKE to help hold the lift in position
+        // Set motor zero power behavior to BRAKE (confirmed by user)
         right_lift.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         left_lift.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
 
@@ -45,13 +43,22 @@ public class Lift {
     }
 
     /**
-     * Sets the power for both lift motors.
+     * Sets the same power for both lift motors.
      * @param power The power (from -1.0 to 1.0) to run the motors.
-     *              Positive power is assumed to be 'UP', negative is 'DOWN'.
      */
     public void setPower(double power) {
         right_lift.setPower(power);
         left_lift.setPower(power);
+    }
+
+    /**
+     * Sets the power for each lift motor individually.
+     * @param rightPower The power for the right motor (-1.0 to 1.0).
+     * @param leftPower The power for the left motor (-1.0 to 1.0).
+     */
+    public void setIndividualPower(double rightPower, double leftPower) {
+        right_lift.setPower(rightPower);
+        left_lift.setPower(leftPower);
     }
 
     /**

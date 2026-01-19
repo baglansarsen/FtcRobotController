@@ -38,22 +38,20 @@ public class OmniwheelDrive {
         imu = hwMap.get(IMU.class, "imu");
         // Adjust the orientation parameters to match your robot
         IMU.Parameters parameters = new IMU.Parameters(new RevHubOrientationOnRobot(
-                RevHubOrientationOnRobot.LogoFacingDirection.UP,
+                RevHubOrientationOnRobot.LogoFacingDirection.RIGHT,
                 RevHubOrientationOnRobot.UsbFacingDirection.FORWARD
         ));
         // Without this, the REV Hub's orientation is assumed to be logo up / USB forward
         imu.initialize(parameters);
 
-        // Set motor directions: This is a crucial step and needs to be correct for Mecanum drive.
-        // Assuming a standard configuration where left side is reversed for forward motion.
-        // **These directions may need adjustment based on the physical robot and wheel mounting!**
+        // Set motor directions based on the user's latest configuration:
         left_front.setDirection(DcMotor.Direction.REVERSE);
-        left_back.setDirection(DcMotor.Direction.REVERSE);
-        right_front.setDirection(DcMotor.Direction.FORWARD);
-        right_back.setDirection(DcMotor.Direction.FORWARD);
+        left_back.setDirection(DcMotor.Direction.FORWARD); // UPDATED
+        right_front.setDirection(DcMotor.Direction.REVERSE); // UPDATED
+        right_back.setDirection(DcMotor.Direction.REVERSE); // UPDATED
 
         // Set motor zero power behavior to BRAKE by default.
-        setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
 
         // Set motor modes to RUN_WITHOUT_ENCODER for simple speed control in TeleOp
         setRunMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);

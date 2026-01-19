@@ -1,10 +1,13 @@
 package org.firstinspires.ftc.teamcode.mechanisms;
 
 import com.qualcomm.robotcore.hardware.ColorSensor;
+import com.qualcomm.robotcore.hardware.DistanceSensor;
 import com.qualcomm.robotcore.hardware.HardwareMap;
+import com.qualcomm.robotcore.hardware.NormalizedColorSensor;
+import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 
 /**
- * A mechanism class for a color sensor, specifically for artifact sorting.
+ * A mechanism class for a color sensor that also provides distance sensing.
  * Assumes hardware map name is "sensor_color_center".
  */
 public class ColorSensorDetector {
@@ -20,11 +23,15 @@ public class ColorSensorDetector {
      * @param hwMap The HardwareMap from the OpMode.
      */
     public void init(HardwareMap hwMap) {
-        // Initialize ColorSensor using the variable name as the hardware map name.
+        // Initialize ColorSensor. This same device can be used as a DistanceSensor.
         colorSensor = hwMap.get(ColorSensor.class, "sensor_color_center");
 
-        // Optional: Enable the LED light on the color sensor. Useful for consistent readings.
-        // This line assumes the sensor has an LED and it's a good practice for your use case.
+        // Set the gain for the color sensor.
+        if (colorSensor instanceof NormalizedColorSensor) {
+            ((NormalizedColorSensor) colorSensor).setGain(10);
+        }
+
+        // Enable the LED light on the color sensor for consistent readings.
         colorSensor.enableLed(true);
     }
 
@@ -57,30 +64,36 @@ public class ColorSensorDetector {
     }
 
     /**
+     * Gets the distance reading from the sensor.
+     * @param unit The desired unit of distance (e.g., DistanceUnit.CM).
+     * @return The distance to the nearest object.
+     */
+    public double getDistance(DistanceUnit unit) {
+        // Cast the ColorSensor to a DistanceSensor to get the distance reading.
+        return ((DistanceSensor) colorSensor).getDistance(unit);
+    }
+
+    /**
      * Helper method to determine if the sensor is seeing a dominant red color.
-     * NOTE: You will need to calibrate the threshold values (e.g., 50, 1.5) based on your environment.
+     * NOTE: You will need to calibrate the threshold values.
      * @return True if the detected color is predominantly red.
      */
     public boolean isRedDominant() {
         int r = getRed();
         int g = getGreen();
         int b = getBlue();
-        
-        // Check if red value is above a certain minimum threshold and significantly higher than green and blue.
         return r > 50 && r > g * 1.5 && r > b * 1.5;
     }
 
     /**
      * Helper method to determine if the sensor is seeing a dominant blue color.
-     * NOTE: You will need to calibrate the threshold values (e.g., 50, 1.5) based on your environment.
+     * NOTE: You will need to calibrate the threshold values.
      * @return True if the detected color is predominantly blue.
      */
     public boolean isBlueDominant() {
         int r = getRed();
         int g = getGreen();
         int b = getBlue();
-        
-        // Check if blue value is above a certain minimum threshold and significantly higher than red and green.
         return b > 50 && b > r * 1.5 && b > g * 1.5;
     }
 }
