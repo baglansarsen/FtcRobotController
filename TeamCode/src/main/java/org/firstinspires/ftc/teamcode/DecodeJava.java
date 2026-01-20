@@ -11,9 +11,11 @@ import org.firstinspires.ftc.teamcode.mechanisms.Shooter;
 import org.firstinspires.ftc.teamcode.mechanisms.Intake;
 import org.firstinspires.ftc.teamcode.mechanisms.Lift;
 
+import static org.firstinspires.ftc.teamcode.mechanisms.Shooter.TARGET_VELOCITY_COUNTS_PER_SEC;
+
 /**
  * TeleOp OpMode for driving an omniwheel (Mecanum) robot.
- * This version includes a revised and more robust auto-intake system.
+ * This version includes a sensor-driven auto-shoot system with velocity recovery checks for consistent shots.
  */
 @TeleOp(name = "Decode Java Drive", group = "Main")
 public class DecodeJava extends LinearOpMode {
@@ -28,14 +30,21 @@ public class DecodeJava extends LinearOpMode {
 
     // Drive mode state
     private boolean isFieldCentric = false;
-    private boolean aButtonGamepad2_last = false; // Fixed: Separate toggle for gamepad 2
+    private boolean aButtonGamepad2_last = false;
 
     // Auto Intake State Machine
     private enum AutoIntakeState { INACTIVE, STAGING_LEFT, STAGING_RIGHT, STAGING_CENTER, DONE }
     private AutoIntakeState autoIntakeState = AutoIntakeState.INACTIVE;
-    private boolean aButtonGamepad1_last = false; // Fixed: Separate toggle for gamepad 1
+    private boolean aButtonGamepad1_last = false;
     private ElapsedTime stateTimer = new ElapsedTime();
     private static final double STAGE_TIMEOUT_S = 3.0;
+    
+    // Auto Shoot State Machine - Added recovery states
+    private enum AutoShootState { INACTIVE, SPIN_UP, FEED_1ST, RECOVER_2ND, FEED_2ND, RECOVER_3RD, FEED_3RD, DONE }
+    private AutoShootState autoShootState = AutoShootState.INACTIVE;
+    private boolean yButtonGamepad1_last = false;
+    private ElapsedTime shootTimer = new ElapsedTime();
+    private static final double FEED_TIMEOUT_S = 1.5;
 
     private static final double ARTIFACT_PRESENCE_DISTANCE_CM = 6.0;
 
@@ -50,25 +59,27 @@ public class DecodeJava extends LinearOpMode {
         lift.init(hardwareMap);
 
         telemetry.addData("Status", "Initialized");
-        telemetry.addData("Controls", "Gamepad 2: Drive | Gamepad 1: Operator");
         telemetry.update();
 
         waitForStart();
         driveTrain.resetIMU();
         if (isStopRequested()) return;
 
-        // Main Loop
         while (opModeIsActive()) {
-            handleDriveControls();
-
-            // Auto-intake mode takes priority over manual operator controls.
-            if (autoIntakeState != AutoIntakeState.INACTIVE) {
-                runAutoIntake();
+            if (autoShootState != AutoShootState.INACTIVE) {
+                runAutoShoot();
             } else {
-                handleOperatorControls();
+                handleDriveControls();
+                if (autoIntakeState != AutoIntakeState.INACTIVE) {
+                    runAutoIntake();
+                } else {
+                    handleOperatorControls();
+                }
             }
-            
+            yButtonGamepad1_last = gamepad1.y;
             telemetry.addData("Auto Intake State", autoIntakeState.toString());
+            telemetry.addData("Auto Shoot State", autoShootState.toString());
+            telemetry.addData("Shooter Ready", shooter.isAtTargetVelocity());
             telemetry.update();
         }
     }
@@ -96,90 +107,145 @@ public class DecodeJava extends LinearOpMode {
     }
 
     private void handleOperatorControls() {
-        // --- Auto Intake Toggle ---
+        if (gamepad1.y && !yButtonGamepad1_last) {
+            autoShootState = AutoShootState.SPIN_UP;
+            shootTimer.reset();
+        }
+        
         if (gamepad1.a && !aButtonGamepad1_last) {
-            autoIntakeState = AutoIntakeState.STAGING_LEFT; // Start the sequence
-            stateTimer.reset(); // Reset timer for the first stage
+            autoIntakeState = AutoIntakeState.STAGING_LEFT;
+            stateTimer.reset();
         }
         aButtonGamepad1_last = gamepad1.a;
         
-        // --- Manual Controls ---
-        // Shooter
-        if (gamepad1.dpad_up) shooter.setPower(0.65); else if (gamepad1.dpad_down) shooter.stop();
-
-        // Intake
+        if (gamepad1.dpad_up) shooter.setVelocity(0.65 * TARGET_VELOCITY_COUNTS_PER_SEC); else if (gamepad1.dpad_down) shooter.stop();
         if (gamepad1.b) intake.in(1.0); else if (gamepad1.x) intake.out(1.0); else intake.stop();
 
-        // Lift & Feeder
         double rightLiftPower = 0;
         double leftLiftPower = 0;
-
         if (gamepad1.right_trigger > 0) rightLiftPower = -gamepad1.right_trigger;
         if (gamepad1.left_trigger > 0) leftLiftPower = -gamepad1.left_trigger;
 
         boolean isFeedingRight = gamepad1.right_bumper && gamepad1.right_trigger == 0 && isGreenDetected();
         boolean isFeedingLeft = gamepad1.left_bumper && gamepad1.left_trigger == 0 && isPurpleDetected();
 
-        if (isFeedingRight) {
-            rightLiftPower = 1.0; 
-            separator.sortRight();
-        } else if (isFeedingLeft) {
-            leftLiftPower = 1.0;
-            separator.sortLeft();
-        } else {
-            separator.stop();
-        }
+        if (isFeedingRight) { rightLiftPower = 1.0; separator.sortRight(); }
+        else if (isFeedingLeft) { leftLiftPower = 1.0; separator.sortLeft(); }
+        else { separator.stop(); }
         
         lift.setIndividualPower(rightLiftPower, leftLiftPower);
     }
     
     private void runAutoIntake() {
-        // Manual override to cancel the sequence
         if (gamepad1.y || stateTimer.seconds() > STAGE_TIMEOUT_S) {
             autoIntakeState = AutoIntakeState.INACTIVE;
             intake.stop(); lift.stop(); separator.stop();
-            telemetry.addData("Auto-Intake", "CANCELLED");
             return;
         }
-
-        intake.in(1.0); // Keep intake running throughout the sequence
-
+        intake.in(1.0);
         switch (autoIntakeState) {
             case STAGING_LEFT:
                 if (!colorSensor.isStagedLeft()) {
-                    lift.setIndividualPower(1.0, 1.0);
+                    lift.setIndividualPower(0.0, 1.0);
                     separator.sortLeft();
                 } else {
-                    lift.stop(); // Stop lifts before transitioning
-                    separator.stop();
+                    lift.stop(); separator.stop();
                     autoIntakeState = AutoIntakeState.STAGING_RIGHT;
                     stateTimer.reset();
                 }
                 break;
-                
             case STAGING_RIGHT:
                 if (!colorSensor.isStagedRight()) {
-                    lift.setIndividualPower(1.0, 1.0);
+                    lift.setIndividualPower(1.0, 0.0);
                     separator.sortRight();
                 } else {
-                    lift.stop();
-                    separator.stop();
+                    lift.stop(); separator.stop();
                     autoIntakeState = AutoIntakeState.STAGING_CENTER;
                     stateTimer.reset();
                 }
                 break;
-
             case STAGING_CENTER:
-                if (colorSensor.isStagedCenter()) {
-                    autoIntakeState = AutoIntakeState.DONE;
+                if (colorSensor.isStagedCenter()) autoIntakeState = AutoIntakeState.DONE;
+                break;
+            case DONE:
+                intake.stop(); lift.stop(); separator.stop();
+                autoIntakeState = AutoIntakeState.INACTIVE;
+                break;
+        }
+    }
+    
+    private void runAutoShoot() {
+        if (gamepad1.y && !yButtonGamepad1_last) {
+            autoShootState = AutoShootState.INACTIVE;
+            shooter.stop(); lift.stop(); separator.stop(); intake.stop();
+            return;
+        }
+        driveTrain.drive(0, 0, 0);
+
+        switch (autoShootState) {
+            case SPIN_UP:
+                shooter.setVelocity(0.65 * TARGET_VELOCITY_COUNTS_PER_SEC);
+                if (shooter.isAtTargetVelocity()) {
+                    autoShootState = AutoShootState.FEED_1ST;
+                    shootTimer.reset();
                 }
                 break;
-            
-            case DONE:
-                intake.stop();
+
+            case FEED_1ST:
+                lift.setIndividualPower(0.0, 1.0);
+                separator.sortLeft();
+                intake.in(1.0);
+                if ((!colorSensor.isStagedLeft() && shootTimer.seconds() > 0.5) || shootTimer.seconds() > FEED_TIMEOUT_S) {
+                    lift.stop();
+                    autoShootState = AutoShootState.RECOVER_2ND; // Recover velocity before next shot
+                    shootTimer.reset();
+                }
+                break;
+
+            case RECOVER_2ND:
                 lift.stop();
-                separator.stop();
-                autoIntakeState = AutoIntakeState.INACTIVE; // Reset for next run
+                intake.stop(); // Temporarily stop to reduce load if necessary
+                if (shooter.isAtTargetVelocity() || shootTimer.seconds() > 1.0) {
+                    autoShootState = AutoShootState.FEED_2ND;
+                    shootTimer.reset();
+                }
+                break;
+
+            case FEED_2ND:
+                lift.setIndividualPower(1.0, 0.0);
+                separator.sortRight();
+                intake.in(1.0);
+                if ((!colorSensor.isStagedRight() && shootTimer.seconds() > 0.5) || shootTimer.seconds() > FEED_TIMEOUT_S) {
+                    lift.stop();
+                    autoShootState = AutoShootState.RECOVER_3RD; // Recover velocity before next shot
+                    shootTimer.reset();
+                }
+                break;
+
+            case RECOVER_3RD:
+                lift.stop();
+                intake.stop();
+                if (shooter.isAtTargetVelocity() || shootTimer.seconds() > 1.0) {
+                    autoShootState = AutoShootState.FEED_3RD;
+                    shootTimer.reset();
+                }
+                break;
+                
+            case FEED_3RD:
+                lift.up();
+                separator.sortLeft();
+                intake.in(1.0);
+                if ((!colorSensor.isStagedCenter() && shootTimer.seconds() > 0.7) || shootTimer.seconds() > FEED_TIMEOUT_S + 0.5) {
+                     autoShootState = AutoShootState.DONE;
+                     shootTimer.reset();
+                }
+                break;
+
+            case DONE:
+                if (shootTimer.seconds() > 0.6) {
+                    shooter.stop(); lift.stop(); separator.stop(); intake.stop();
+                    autoShootState = AutoShootState.INACTIVE;
+                }
                 break;
         }
     }
