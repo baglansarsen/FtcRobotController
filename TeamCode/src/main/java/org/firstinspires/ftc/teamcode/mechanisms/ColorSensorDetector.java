@@ -7,93 +7,125 @@ import com.qualcomm.robotcore.hardware.NormalizedColorSensor;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 
 /**
- * A mechanism class for a color sensor that also provides distance sensing.
- * Assumes hardware map name is "sensor_color_center".
+ * A mechanism class for managing multiple color/distance sensors.
+ * It now handles left, center, and right sensors.
  */
 public class ColorSensorDetector {
-    // Sensor declaration.
-    private ColorSensor colorSensor = null;
+    // Enum to specify which sensor to use
+    public enum SensorLocation {
+        LEFT,
+        CENTER,
+        RIGHT
+    }
+
+    // Sensor declarations
+    private ColorSensor sensor_color_left = null;
+    private ColorSensor sensor_color_center = null;
+    private ColorSensor sensor_color_right = null;
+
+    // Distance threshold for an artifact being "staged" or "present"
+    private static final double STAGING_DISTANCE_CM = 5.0; // Assume a closer distance for precise staging
 
     public ColorSensorDetector() {
         // Default constructor
     }
 
     /**
-     * Initializes the color sensor.
+     * Initializes all three color sensors.
      * @param hwMap The HardwareMap from the OpMode.
      */
     public void init(HardwareMap hwMap) {
-        // Initialize ColorSensor. This same device can be used as a DistanceSensor.
-        colorSensor = hwMap.get(ColorSensor.class, "sensor_color_center");
+        // Initialize all sensors from the hardware map
+        sensor_color_left = hwMap.get(ColorSensor.class, "sensor_color_left");
+        sensor_color_center = hwMap.get(ColorSensor.class, "sensor_color_center");
+        sensor_color_right = hwMap.get(ColorSensor.class, "sensor_color_right");
 
-        // Set the gain for the color sensor.
-        if (colorSensor instanceof NormalizedColorSensor) {
-            ((NormalizedColorSensor) colorSensor).setGain(10);
+        // Configure all sensors with the same settings
+        configureSensor(sensor_color_left);
+        configureSensor(sensor_color_center);
+        configureSensor(sensor_color_right);
+    }
+
+    /**
+     * Helper method to apply common settings to a sensor.
+     * @param sensor The sensor to configure.
+     */
+    private void configureSensor(ColorSensor sensor) {
+        if (sensor instanceof NormalizedColorSensor) {
+            ((NormalizedColorSensor) sensor).setGain(10);
         }
-
-        // Enable the LED light on the color sensor for consistent readings.
-        colorSensor.enableLed(true);
+        sensor.enableLed(true);
     }
 
     /**
-     * @return The red value reported by the color sensor.
+     * Gets the specified sensor object based on its location.
+     * @param location The location of the sensor to get (LEFT, CENTER, or RIGHT).
+     * @return The ColorSensor object. Returns the center sensor by default.
      */
-    public int getRed() {
-        return colorSensor.red();
+    private ColorSensor getSensor(SensorLocation location) {
+        switch (location) {
+            case LEFT:
+                return sensor_color_left;
+            case RIGHT:
+                return sensor_color_right;
+            case CENTER:
+            default:
+                return sensor_color_center;
+        }
+    }
+    
+    /**
+     * Checks if an artifact is correctly positioned under the LEFT lift.
+     * The condition is that the sensor sees the artifact (close enough).
+     * @return True if the artifact is staged left.
+     */
+    public boolean isStagedLeft() {
+        return getDistance(SensorLocation.LEFT, DistanceUnit.CM) < STAGING_DISTANCE_CM;
     }
 
     /**
-     * @return The green value reported by the color sensor.
+     * Checks if an artifact is correctly positioned under the RIGHT lift.
+     * The condition is that the sensor sees the artifact (close enough).
+     * @return True if the artifact is staged right.
      */
-    public int getGreen() {
-        return colorSensor.green();
+    public boolean isStagedRight() {
+        return getDistance(SensorLocation.RIGHT, DistanceUnit.CM) < STAGING_DISTANCE_CM;
     }
 
     /**
-     * @return The blue value reported by the color sensor.
+     * Checks if an artifact is correctly positioned under the CENTER sensor.
+     * The condition is that the sensor sees the artifact (close enough).
+     * @return True if the artifact is staged center.
      */
-    public int getBlue() {
-        return colorSensor.blue();
+    public boolean isStagedCenter() {
+        return getDistance(SensorLocation.CENTER, DistanceUnit.CM) < STAGING_DISTANCE_CM;
     }
+    
+    // --- Accessor methods ---
 
-    /**
-     * @return The combined total light value (Alpha) reported by the color sensor.
-     */
-    public int getAlpha() {
-        return colorSensor.alpha();
-    }
+    public int getRed(SensorLocation location) { return getSensor(location).red(); }
+    public int getGreen(SensorLocation location) { return getSensor(location).green(); }
+    public int getBlue(SensorLocation location) { return getSensor(location).blue(); }
 
-    /**
-     * Gets the distance reading from the sensor.
-     * @param unit The desired unit of distance (e.g., DistanceUnit.CM).
-     * @return The distance to the nearest object.
-     */
-    public double getDistance(DistanceUnit unit) {
-        // Cast the ColorSensor to a DistanceSensor to get the distance reading.
-        return ((DistanceSensor) colorSensor).getDistance(unit);
+    public double getDistance(SensorLocation location, DistanceUnit unit) {
+        return ((DistanceSensor) getSensor(location)).getDistance(unit);
     }
+    
+    // --- Legacy methods (Default to CENTER sensor) ---
 
-    /**
-     * Helper method to determine if the sensor is seeing a dominant red color.
-     * NOTE: You will need to calibrate the threshold values.
-     * @return True if the detected color is predominantly red.
-     */
-    public boolean isRedDominant() {
-        int r = getRed();
-        int g = getGreen();
-        int b = getBlue();
-        return r > 50 && r > g * 1.5 && r > b * 1.5;
-    }
+    /** @deprecated Use getRed(SensorLocation.CENTER) instead. */
+    @Deprecated
+    public int getRed() { return getRed(SensorLocation.CENTER); }
 
-    /**
-     * Helper method to determine if the sensor is seeing a dominant blue color.
-     * NOTE: You will need to calibrate the threshold values.
-     * @return True if the detected color is predominantly blue.
-     */
-    public boolean isBlueDominant() {
-        int r = getRed();
-        int g = getGreen();
-        int b = getBlue();
-        return b > 50 && b > r * 1.5 && b > g * 1.5;
-    }
+    /** @deprecated Use getGreen(SensorLocation.CENTER) instead. */
+    @Deprecated
+    public int getGreen() { return getGreen(SensorLocation.CENTER); }
+
+    /** @deprecated Use getBlue(SensorLocation.CENTER) instead. */
+    @Deprecated
+    public int getBlue() { return getBlue(SensorLocation.CENTER); }
+
+    /** @deprecated Use getDistance(SensorLocation.CENTER, unit) instead. */
+    @Deprecated
+    public double getDistance(DistanceUnit unit) { return getDistance(SensorLocation.CENTER, unit); }
 }

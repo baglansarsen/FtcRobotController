@@ -31,7 +31,7 @@ public class Lift {
 
         // Set motor directions based on the user's latest configuration:
         right_lift.setDirection(DcMotor.Direction.REVERSE);
-        left_lift.setDirection(DcMotor.Direction.REVERSE); 
+        left_lift.setDirection(DcMotor.Direction.FORWARD);
 
         // Set motor zero power behavior to BRAKE (confirmed by user)
         right_lift.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);

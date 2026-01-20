@@ -2,6 +2,7 @@ package org.firstinspires.ftc.teamcode;
 
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
+import com.qualcomm.robotcore.util.ElapsedTime;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import org.firstinspires.ftc.teamcode.mechanisms.OmniwheelDrive;
 import org.firstinspires.ftc.teamcode.mechanisms.ColorSensorDetector;
@@ -12,12 +13,12 @@ import org.firstinspires.ftc.teamcode.mechanisms.Lift;
 
 /**
  * TeleOp OpMode for driving an omniwheel (Mecanum) robot.
- * This version contains advanced operator controls for sorting and feeding.
+ * This version includes a revised and more robust auto-intake system.
  */
 @TeleOp(name = "Decode Java Drive", group = "Main")
 public class DecodeJava extends LinearOpMode {
 
-    // Instantiate mechanisms
+    // Mechanisms
     private OmniwheelDrive driveTrain = new OmniwheelDrive();
     private ColorSensorDetector colorSensor = new ColorSensorDetector();
     private Separator separator = new Separator();
@@ -25,16 +26,22 @@ public class DecodeJava extends LinearOpMode {
     private Intake intake = new Intake();
     private Lift lift = new Lift();
 
-    // Variables for drive mode toggle
+    // Drive mode state
     private boolean isFieldCentric = false;
-    private boolean aToggleLast = false;
+    private boolean aButtonGamepad2_last = false; // Fixed: Separate toggle for gamepad 2
 
-    // Threshold for detecting an artifact
+    // Auto Intake State Machine
+    private enum AutoIntakeState { INACTIVE, STAGING_LEFT, STAGING_RIGHT, STAGING_CENTER, DONE }
+    private AutoIntakeState autoIntakeState = AutoIntakeState.INACTIVE;
+    private boolean aButtonGamepad1_last = false; // Fixed: Separate toggle for gamepad 1
+    private ElapsedTime stateTimer = new ElapsedTime();
+    private static final double STAGE_TIMEOUT_S = 3.0;
+
     private static final double ARTIFACT_PRESENCE_DISTANCE_CM = 6.0;
 
     @Override
     public void runOpMode() {
-        // 1. Initialize all mechanisms
+        // Initialization
         driveTrain.init(hardwareMap);
         colorSensor.init(hardwareMap);
         separator.init(hardwareMap);
@@ -43,40 +50,38 @@ public class DecodeJava extends LinearOpMode {
         lift.init(hardwareMap);
 
         telemetry.addData("Status", "Initialized");
-        telemetry.addData("Controls", "Gamepad 2 for Drive, Gamepad 1 for Operator");
+        telemetry.addData("Controls", "Gamepad 2: Drive | Gamepad 1: Operator");
         telemetry.update();
 
         waitForStart();
-
         driveTrain.resetIMU();
-
         if (isStopRequested()) return;
 
+        // Main Loop
         while (opModeIsActive()) {
-            // Gamepad 2 controls the robot's movement
             handleDriveControls();
-            
-            // Gamepad 1 controls all other mechanisms (intake, lift, shooter, etc.)
-            handleOperatorControls();
 
-            // Update all telemetry
+            // Auto-intake mode takes priority over manual operator controls.
+            if (autoIntakeState != AutoIntakeState.INACTIVE) {
+                runAutoIntake();
+            } else {
+                handleOperatorControls();
+            }
+            
+            telemetry.addData("Auto Intake State", autoIntakeState.toString());
             telemetry.update();
         }
     }
 
-    /**
-     * Handles all robot movement based on gamepad 2 inputs.
-     */
     private void handleDriveControls() {
         double forward = -gamepad2.left_stick_y;
         double strafe = gamepad2.left_stick_x;
         double rotation = gamepad2.right_stick_x;
 
-        boolean aToggle = gamepad2.a;
-        if (aToggle && !aToggleLast) {
+        if (gamepad2.a && !aButtonGamepad2_last) {
             isFieldCentric = !isFieldCentric;
         }
-        aToggleLast = aToggle;
+        aButtonGamepad2_last = gamepad2.a;
 
         if (gamepad2.b) {
             driveTrain.resetIMU();
@@ -90,85 +95,102 @@ public class DecodeJava extends LinearOpMode {
         telemetry.addData("Drive Mode", isFieldCentric ? "Field-Centric" : "Robot-Centric");
     }
 
-    /**
-     * Handles all operator controls for mechanisms based on gamepad 1 inputs.
-     */
     private void handleOperatorControls() {
-        // --- Shooter Control ---
-        if (gamepad1.dpad_up) {
-            shooter.setPower(0.6);
-        } else if (gamepad1.dpad_down) {
-            shooter.stop();
+        // --- Auto Intake Toggle ---
+        if (gamepad1.a && !aButtonGamepad1_last) {
+            autoIntakeState = AutoIntakeState.STAGING_LEFT; // Start the sequence
+            stateTimer.reset(); // Reset timer for the first stage
         }
+        aButtonGamepad1_last = gamepad1.a;
+        
+        // --- Manual Controls ---
+        // Shooter
+        if (gamepad1.dpad_up) shooter.setPower(0.65); else if (gamepad1.dpad_down) shooter.stop();
 
-        // --- Intake Control ---
-        if (gamepad1.b) { // 'B' button runs intake IN
-            intake.in(1.0);
-        } else if (gamepad1.a) { // 'A' button runs intake OUT
-            intake.out(1.0);
-        } else {
-            intake.stop();
-        }
+        // Intake
+        if (gamepad1.b) intake.in(1.0); else if (gamepad1.x) intake.out(1.0); else intake.stop();
 
-        // --- Lift & Feeder Control ---
+        // Lift & Feeder
         double rightLiftPower = 0;
         double leftLiftPower = 0;
 
-        // The triggers provide a variable-speed manual override to move the lift DOWN.
-        // This is useful for clearing jams.
-        double rightTrigger = gamepad1.right_trigger;
-        double leftTrigger = gamepad1.left_trigger;
+        if (gamepad1.right_trigger > 0) rightLiftPower = -gamepad1.right_trigger;
+        if (gamepad1.left_trigger > 0) leftLiftPower = -gamepad1.left_trigger;
 
-        if (rightTrigger > 0) {
-            rightLiftPower = -rightTrigger; // Negative power to move down
-        } 
-        if (leftTrigger > 0) {
-            leftLiftPower = -leftTrigger; // Negative power to move down
-        }
+        boolean isFeedingRight = gamepad1.right_bumper && gamepad1.right_trigger == 0 && isGreenDetected();
+        boolean isFeedingLeft = gamepad1.left_bumper && gamepad1.left_trigger == 0 && isPurpleDetected();
 
-        // The bumpers are used to feed artifacts UP into the shooter.
-        // This only happens if a trigger is not being pressed.
-        if (rightTrigger == 0 && gamepad1.right_bumper && isGreenDetected()) {
-            rightLiftPower = 1.0; // Feed green artifact with right lift
+        if (isFeedingRight) {
+            rightLiftPower = 1.0; 
             separator.sortRight();
-        } else if (leftTrigger == 0 && gamepad1.left_bumper && isPurpleDetected()) {
-            leftLiftPower = 1.0; // Feed purple artifact with left lift
+        } else if (isFeedingLeft) {
+            leftLiftPower = 1.0;
             separator.sortLeft();
-        } else if (!gamepad1.right_bumper && !gamepad1.left_bumper) {
-             // Stop the separator if no feeding action is happening
-             separator.stop();
+        } else {
+            separator.stop();
         }
         
         lift.setIndividualPower(rightLiftPower, leftLiftPower);
+    }
+    
+    private void runAutoIntake() {
+        // Manual override to cancel the sequence
+        if (gamepad1.y || stateTimer.seconds() > STAGE_TIMEOUT_S) {
+            autoIntakeState = AutoIntakeState.INACTIVE;
+            intake.stop(); lift.stop(); separator.stop();
+            telemetry.addData("Auto-Intake", "CANCELLED");
+            return;
+        }
 
-        // --- Telemetry for Operator ---
-        telemetry.addData("Lift Power (L, R)", "%.2f, %.2f", leftLiftPower, rightLiftPower);
-        telemetry.addData("Distance (cm)", "%.2f", colorSensor.getDistance(DistanceUnit.CM));
+        intake.in(1.0); // Keep intake running throughout the sequence
+
+        switch (autoIntakeState) {
+            case STAGING_LEFT:
+                if (!colorSensor.isStagedLeft()) {
+                    lift.setIndividualPower(1.0, 1.0);
+                    separator.sortLeft();
+                } else {
+                    lift.stop(); // Stop lifts before transitioning
+                    separator.stop();
+                    autoIntakeState = AutoIntakeState.STAGING_RIGHT;
+                    stateTimer.reset();
+                }
+                break;
+                
+            case STAGING_RIGHT:
+                if (!colorSensor.isStagedRight()) {
+                    lift.setIndividualPower(1.0, 1.0);
+                    separator.sortRight();
+                } else {
+                    lift.stop();
+                    separator.stop();
+                    autoIntakeState = AutoIntakeState.STAGING_CENTER;
+                    stateTimer.reset();
+                }
+                break;
+
+            case STAGING_CENTER:
+                if (colorSensor.isStagedCenter()) {
+                    autoIntakeState = AutoIntakeState.DONE;
+                }
+                break;
+            
+            case DONE:
+                intake.stop();
+                lift.stop();
+                separator.stop();
+                autoIntakeState = AutoIntakeState.INACTIVE; // Reset for next run
+                break;
+        }
     }
 
-    /**
-     * Checks if a green artifact is present and ready to be fed.
-     * @return True if a green artifact is detected within range.
-     */
     private boolean isGreenDetected() {
-        // Check for artifact presence first
-        if (colorSensor.getDistance(DistanceUnit.CM) > ARTIFACT_PRESENCE_DISTANCE_CM) {
-            return false;
-        }
-        // Check for green color dominance
-        return colorSensor.getGreen() > colorSensor.getBlue();
+        if (colorSensor.getDistance(ColorSensorDetector.SensorLocation.CENTER, DistanceUnit.CM) > ARTIFACT_PRESENCE_DISTANCE_CM) return false;
+        return colorSensor.getGreen(ColorSensorDetector.SensorLocation.CENTER) > colorSensor.getBlue(ColorSensorDetector.SensorLocation.CENTER);
     }
 
-    /**
-     * Checks if a purple (blue) artifact is present and ready to be fed.
-     * @return True if a purple artifact is detected within range.
-     */
     private boolean isPurpleDetected() {
-        // Check for artifact presence first
-        if (colorSensor.getDistance(DistanceUnit.CM) > ARTIFACT_PRESENCE_DISTANCE_CM) {
-            return false;
-        }
-        // Check for purple/blue color dominance
-        return colorSensor.getBlue() > colorSensor.getGreen();
+        if (colorSensor.getDistance(ColorSensorDetector.SensorLocation.CENTER, DistanceUnit.CM) > ARTIFACT_PRESENCE_DISTANCE_CM) return false;
+        return colorSensor.getBlue(ColorSensorDetector.SensorLocation.CENTER) > colorSensor.getGreen(ColorSensorDetector.SensorLocation.CENTER);
     }
 }
