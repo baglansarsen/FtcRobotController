@@ -32,13 +32,14 @@ public class DecodeJava extends LinearOpMode {
     private boolean isFieldCentric = false;
     private boolean aButtonGamepad2_last = false;
 
-    // Auto Intake State Machine
-    private enum AutoIntakeState { INACTIVE, STAGING_LEFT, STAGING_RIGHT, STAGING_CENTER, DONE }
+    // Auto Intake State machine and control
+    private enum AutoIntakeState { INACTIVE, RUNNING }
     private AutoIntakeState autoIntakeState = AutoIntakeState.INACTIVE;
     private boolean aButtonGamepad1_last = false;
-    private ElapsedTime stateTimer = new ElapsedTime();
-    private static final double STAGE_TIMEOUT_S = 3.0;
-    
+    private boolean isLiftingForCenter = false;
+    private ElapsedTime centerLiftTimer = new ElapsedTime();
+    private static final double CENTER_LIFT_TIMEOUT_S = 2.0;
+
     // Auto Shoot State Machine - Simplified with velocity recovery
     private enum AutoShootState { INACTIVE, SPIN_UP, FEED_1ST, RECOVER_2ND, FEED_2ND, RECOVER_3RD, FEED_3RD, DONE }
     private AutoShootState autoShootState = AutoShootState.INACTIVE;
@@ -75,7 +76,22 @@ public class DecodeJava extends LinearOpMode {
                 }
             }
             yButtonGamepad1_last = gamepad1.y;
-            telemetry.addData("Auto State", autoShootState.toString());
+            aButtonGamepad1_last = gamepad1.a;
+
+            // Calculate current ball count for telemetry
+            int ballCount = 0;
+            if (colorSensor.isStagedLeft()) ballCount++;
+            if (colorSensor.isStagedRight()) ballCount++;
+            if (colorSensor.isStagedCenter()) ballCount++;
+
+            telemetry.addData("Auto State", autoShootState != AutoShootState.INACTIVE ? autoShootState.toString() : (autoIntakeState != AutoIntakeState.INACTIVE ? "AUTO INTAKE" : "MANUAL"));
+            telemetry.addData("Balls Staged", ballCount);
+            telemetry.addData("Staging Status", "L:%b R:%b C:%b", 
+                    colorSensor.isStagedLeft(), colorSensor.isStagedRight(), colorSensor.isStagedCenter());
+            telemetry.addData("Sensor CM", "L:%.1f R:%.1f C:%.1f",
+                    colorSensor.getDistance(ColorSensorDetector.SensorLocation.LEFT, DistanceUnit.CM),
+                    colorSensor.getDistance(ColorSensorDetector.SensorLocation.RIGHT, DistanceUnit.CM),
+                    colorSensor.getDistance(ColorSensorDetector.SensorLocation.CENTER, DistanceUnit.CM));
             telemetry.addData("Shooter Ready", shooter.isAtTargetVelocity());
             telemetry.update();
         }
@@ -94,75 +110,99 @@ public class DecodeJava extends LinearOpMode {
     private void handleOperatorControls() {
         if (gamepad1.y && !yButtonGamepad1_last) {
             autoShootState = AutoShootState.SPIN_UP;
-            shootTimer.reset(); // Reset timer on sequence start
+            shootTimer.reset(); 
         }
+        
+        // Toggle Auto Intake State
         if (gamepad1.a && !aButtonGamepad1_last) {
-            autoIntakeState = AutoIntakeState.STAGING_LEFT;
-            stateTimer.reset();
+            if (autoIntakeState == AutoIntakeState.RUNNING) {
+                // Stop and reset state
+                autoIntakeState = AutoIntakeState.INACTIVE;
+                isLiftingForCenter = false;
+                intake.stop();
+                lift.stop();
+                separator.stop();
+            } else {
+                // Start and reset state
+                autoIntakeState = AutoIntakeState.RUNNING;
+                isLiftingForCenter = false;
+            }
         }
-        aButtonGamepad1_last = gamepad1.a;
         
-        // Manual Shooter/Intake Controls
+        // Manual Shooter Controls
         if (gamepad1.dpad_up) shooter.setVelocity(SHOOT_VELOCITY); else if (gamepad1.dpad_down) shooter.stop();
-        if (gamepad1.b) intake.in(1.0); else if (gamepad1.x) intake.out(1.0); else intake.stop();
         
-        // Manual Lift/Separator Controls
-        double rPower = (gamepad1.right_trigger > 0) ? -gamepad1.right_trigger : 0;
-        double lPower = (gamepad1.left_trigger > 0) ? -gamepad1.left_trigger : 0;
+        // Manual Intake and Sorting Controls
+        if (gamepad1.b) {
+            intake.in(1.0);
+            if (colorSensor.isStagedLeft()) {
+                separator.sortRight();
+            } else {
+                separator.sortLeft();
+            }
+        } else if (gamepad1.x) {
+            intake.out(1.0);
+            separator.stop();
+        } else {
+            intake.stop();
+            separator.stop();
+        }
+        
+        // Manual Lift Controls
+        double rPower = gamepad1.left_bumper ? -1.0 : gamepad1.left_trigger;
+        double lPower = gamepad1.right_bumper ? -1.0 : gamepad1.right_trigger;
         lift.setIndividualPower(rPower, lPower);
     }
     
     private void runAutoIntake() {
-        // Full Auto-Intake logic is restored here
-        if (gamepad1.y || stateTimer.seconds() > STAGE_TIMEOUT_S) {
+        // Interrupt logic: gamepad1.x (outtake) or gamepad1.y (shoot sequence)
+        if (gamepad1.x || gamepad1.y) {
             autoIntakeState = AutoIntakeState.INACTIVE;
+            isLiftingForCenter = false; // Reset on interrupt
             intake.stop(); lift.stop(); separator.stop();
             return;
         }
 
-        intake.in(1.0); // Keep intake running throughout the sequence
+        intake.in(1.0); 
 
-        switch (autoIntakeState) {
-            case STAGING_LEFT:
-                if (!colorSensor.isStagedLeft()) {
-                    lift.setIndividualPower(0.0, 1.0);
-                    separator.sortLeft();
-                } else {
-                    lift.stop();
-                    separator.stop();
-                    autoIntakeState = AutoIntakeState.STAGING_RIGHT;
-                    stateTimer.reset();
-                }
-                break;
-                
-            case STAGING_RIGHT:
-                if (!colorSensor.isStagedRight()) {
-                    lift.setIndividualPower(1.0, 0.0);
-                    separator.sortRight();
-                } else {
-                    lift.stop();
-                    separator.stop();
-                    autoIntakeState = AutoIntakeState.STAGING_CENTER;
-                    stateTimer.reset();
-                }
-                break;
-
-            case STAGING_CENTER:
-                if (colorSensor.isStagedCenter()) {
-                    autoIntakeState = AutoIntakeState.DONE;
-                }
-                break;
-            
-            case DONE:
+        // Logic for lifting the 3rd ball with a timeout
+        if (isLiftingForCenter) {
+            if (colorSensor.isStagedCenter() || centerLiftTimer.seconds() > CENTER_LIFT_TIMEOUT_S) {
+                // Ball is staged or we timed out, stop everything.
                 intake.stop();
                 lift.stop();
                 separator.stop();
                 autoIntakeState = AutoIntakeState.INACTIVE;
-                break;
+                isLiftingForCenter = false;
+            }
+            // Otherwise, do nothing and let the lift continue running.
+            return; 
+        }
+
+        // Standard staging logic for 1st and 2nd balls
+        if (!colorSensor.isStagedLeft()) {
+            lift.setIndividualPower(0.0, 1.0);
+            separator.sortLeft();
+        } else if (!colorSensor.isStagedRight()) {
+            lift.setIndividualPower(1.0, 0.0);
+            separator.sortRight();
+        } else if (!colorSensor.isStagedCenter()) {
+            // L and R are full, C is not. Start lifting for the center ball.
+            isLiftingForCenter = true;
+            centerLiftTimer.reset();
+            lift.setIndividualPower(-0.2, -0.2); // Run both lifts up
+            separator.stop();
+        } else {
+            // All 3 are somehow already staged when starting. Stop immediately.
+            autoIntakeState = AutoIntakeState.INACTIVE;
+            intake.stop();
+            lift.stop();
+            separator.stop();
         }
     }
     
     private void runAutoShoot() {
+        // ... (runAutoShoot logic remains unchanged)
         if (gamepad1.y && !yButtonGamepad1_last) {
             autoShootState = AutoShootState.INACTIVE;
             shooter.stop(); lift.stop(); separator.stop(); intake.stop();
@@ -175,18 +215,16 @@ public class DecodeJava extends LinearOpMode {
                 shooter.setVelocity(SHOOT_VELOCITY);
                 if (shooter.isAtTargetVelocity()) {
                     autoShootState = AutoShootState.FEED_1ST;
-                    shootTimer.reset(); // Reset timer for feed duration
+                    shootTimer.reset(); 
                 }
                 break;
 
             case FEED_1ST:
-                // Shot 1: Left Lift + Sort Left
                 lift.setIndividualPower(0, 1.0);
                 separator.sortLeft();
                 intake.in(1.0);
                 if (shootTimer.seconds() > 0.5) {
-                    lift.stop();
-                    intake.stop();
+                    lift.stop(); intake.stop();
                     autoShootState = AutoShootState.RECOVER_2ND;
                 }
                 break;
@@ -195,18 +233,16 @@ public class DecodeJava extends LinearOpMode {
                 lift.stop(); separator.stop(); intake.stop();
                 if (shooter.isAtTargetVelocity()) {
                     autoShootState = AutoShootState.FEED_2ND;
-                    shootTimer.reset(); // Reset timer for feed duration
+                    shootTimer.reset(); 
                 }
                 break;
 
             case FEED_2ND:
-                // Shot 2: Right Lift + Sort Right
                 lift.setIndividualPower(1.0, 0);
-                separator.sortLeft(); // Corrected from sortLeft()
+                separator.sortLeft(); 
                 intake.in(1.0);
                 if (shootTimer.seconds() > 0.5) {
-                    lift.stop();
-                    intake.stop();
+                    lift.stop(); intake.stop();
                     autoShootState = AutoShootState.RECOVER_3RD;
                 }
                 break;
@@ -215,16 +251,15 @@ public class DecodeJava extends LinearOpMode {
                 lift.stop(); separator.stop(); intake.stop();
                 if (shooter.isAtTargetVelocity()) {
                     autoShootState = AutoShootState.FEED_3RD;
-                    shootTimer.reset(); // Reset timer for feed duration
+                    shootTimer.reset(); 
                 }
                 break;
                 
             case FEED_3RD:
-                // Shot 3: Both Lifts + Sort Left
                 lift.up();
                 separator.sortLeft();
                 intake.in(1.0);
-                if (shootTimer.seconds() > 1.0) { // Longer time for third artifact to clear
+                if (shootTimer.seconds() > 1.0) {
                     lift.stop(); separator.stop(); intake.stop();
                     autoShootState = AutoShootState.DONE;
                 }
@@ -235,15 +270,5 @@ public class DecodeJava extends LinearOpMode {
                 autoShootState = AutoShootState.INACTIVE;
                 break;
         }
-    }
-
-    private boolean isGreenDetected() {
-        if (colorSensor.getDistance(ColorSensorDetector.SensorLocation.CENTER, DistanceUnit.CM) > ARTIFACT_PRESENCE_DISTANCE_CM) return false;
-        return colorSensor.getGreen(ColorSensorDetector.SensorLocation.CENTER) > colorSensor.getBlue(ColorSensorDetector.SensorLocation.CENTER);
-    }
-
-    private boolean isPurpleDetected() {
-        if (colorSensor.getDistance(ColorSensorDetector.SensorLocation.CENTER, DistanceUnit.CM) > ARTIFACT_PRESENCE_DISTANCE_CM) return false;
-        return colorSensor.getBlue(ColorSensorDetector.SensorLocation.CENTER) > colorSensor.getGreen(ColorSensorDetector.SensorLocation.CENTER);
     }
 }
