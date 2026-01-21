@@ -8,6 +8,12 @@ import com.qualcomm.robotcore.hardware.HardwareMap;
  * The assumed hardware map name is "seperater".
  */
 public class Separator {
+
+    public enum Direction {
+        LEFT,
+        RIGHT
+    }
+
     // Servo declaration.
     private CRServo seperater = null;
 

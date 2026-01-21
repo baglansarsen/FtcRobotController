@@ -1,5 +1,6 @@
 package org.firstinspires.ftc.teamcode;
 
+import com.qualcomm.robotcore.eventloop.opmode.Disabled;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.DcMotor;
@@ -8,6 +9,7 @@ import com.qualcomm.robotcore.hardware.DcMotorSimple;
 /**
  * Basic OpMode to test Omniwheel/Mecanum movement.
  */
+@Disabled
 @TeleOp(name="MyTest: Omniwheel Movement", group="Test")
 public class MyTest extends LinearOpMode {
 
