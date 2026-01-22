@@ -38,7 +38,7 @@ public class DecodeJava extends LinearOpMode {
     private AutoIntakeState autoIntakeState = AutoIntakeState.INACTIVE;
     private boolean aButtonGamepad1_last = false;
     private ElapsedTime centerLiftTimer = new ElapsedTime();
-    private static final double CENTER_LIFT_TIMEOUT_S = 2.0;
+    private static final double CENTER_LIFT_TIMEOUT_S = 4.0;
 
     // Auto Shoot State Machine - Simplified with velocity recovery
     private enum AutoShootState { INACTIVE, SPIN_UP, FEED_1ST, RECOVER_2ND, FEED_2ND, RECOVER_3RD, FEED_3RD, DONE }
@@ -46,7 +46,7 @@ public class DecodeJava extends LinearOpMode {
     private boolean yButtonGamepad1_last = false;
     private ElapsedTime shootTimer = new ElapsedTime();
 
-    private static final double SHOOT_VELOCITY = 1170; // 0.65 * 1800
+    private static final double SHOOT_VELOCITY = 1100; // 0.65 * 1800
     private static final double ARTIFACT_PRESENCE_DISTANCE_CM = 6.0;
 
 
@@ -67,17 +67,13 @@ public class DecodeJava extends LinearOpMode {
         while (opModeIsActive()) {
             if (autoShootState != AutoShootState.INACTIVE) {
                 runAutoShoot();
-            } else if (autoIntakeState == AutoIntakeState.WAITING_TO_SHOOT) {
-                // If auto intake finished staging all 3 balls, transition to auto shoot
-                autoShootState = AutoShootState.SPIN_UP;
-                shootTimer.reset();
-                runAutoShoot(); // Immediately run auto shoot state to start spin-up
             } else {
                 handleDriveControls();
-                if (autoIntakeState != AutoIntakeState.INACTIVE) {
+                handleOperatorControls(); // Always allow operator controls if not shooting
+
+                // Only run auto intake sequence if it is actively staging (not INACTIVE or WAITING_TO_SHOOT)
+                if (autoIntakeState != AutoIntakeState.INACTIVE && autoIntakeState != AutoIntakeState.WAITING_TO_SHOOT) {
                     runAutoIntake();
-                } else {
-                    handleOperatorControls();
                 }
             }
             yButtonGamepad1_last = gamepad1.y;
@@ -97,10 +93,10 @@ public class DecodeJava extends LinearOpMode {
             } else if (autoIntakeState != AutoIntakeState.INACTIVE) {
                 autoModeDisplay = "AUTO INTAKE: " + autoIntakeState.toString();
             }
-            
+
             telemetry.addData("Auto State", autoModeDisplay);
             telemetry.addData("Balls Staged", ballCount);
-            telemetry.addData("Staging Status", "L:%b R:%b C:%b", 
+            telemetry.addData("Staging Status", "L:%b R:%b C:%b",
                     colorSensor.isStagedLeft(), colorSensor.isStagedRight(), colorSensor.isStagedCenter());
             telemetry.addData("Sensor CM", "L:%.1f R:%.1f C:%.1f",
                     colorSensor.getDistance(ColorSensorDetector.SensorLocation.LEFT, DistanceUnit.CM),
@@ -125,10 +121,10 @@ public class DecodeJava extends LinearOpMode {
         // Start Auto Shoot sequence manually (interrupts intake)
         if (gamepad1.y && !yButtonGamepad1_last) {
             autoShootState = AutoShootState.SPIN_UP;
-            shootTimer.reset(); 
+            shootTimer.reset();
             autoIntakeState = AutoIntakeState.INACTIVE; // Stop intake if running
         }
-        
+
         // Toggle Auto Intake State (Only if not in auto shoot)
         if (gamepad1.a && !aButtonGamepad1_last) {
             if (autoIntakeState == AutoIntakeState.INACTIVE) {
@@ -149,10 +145,10 @@ public class DecodeJava extends LinearOpMode {
                 separator.stop();
             }
         }
-        
+
         // Manual Shooter Controls
         if (gamepad1.dpad_up) shooter.setVelocity(SHOOT_VELOCITY); else if (gamepad1.dpad_down) shooter.stop();
-        
+
         // Manual Intake and Sorting Controls (Only if not in auto intake/shoot)
         if (autoIntakeState == AutoIntakeState.INACTIVE && autoShootState == AutoShootState.INACTIVE) {
             if (gamepad1.b) {
@@ -170,7 +166,7 @@ public class DecodeJava extends LinearOpMode {
                 separator.stop();
             }
         }
-        
+
         // Manual Lift Controls (Only if not in auto intake/shoot)
         if (autoIntakeState == AutoIntakeState.INACTIVE && autoShootState == AutoShootState.INACTIVE) {
             double rPower = gamepad1.left_bumper ? -1.0 : gamepad1.left_trigger;
@@ -178,7 +174,7 @@ public class DecodeJava extends LinearOpMode {
             lift.setIndividualPower(rPower, lPower);
         }
     }
-    
+
     private void runAutoIntake() {
         // Interrupt logic: gamepad1.x (outtake) or gamepad1.y (shoot sequence) will stop intake via handleOperatorControls/runOpMode
         if (gamepad1.x || gamepad1.y) {
@@ -203,7 +199,7 @@ public class DecodeJava extends LinearOpMode {
                     separator.stop(); // Stop sorting while transition to next stage
                 }
                 break;
-                
+
             case STAGE_TWO:
                 // Stage 2: Ball 2 goes to Right sensor. If staged, move to STAGE_THREE.
                 lift.setIndividualPower(1.0, 0.0); // Based on old code for staging right
@@ -216,29 +212,23 @@ public class DecodeJava extends LinearOpMode {
                     separator.stop(); // Stop sorting while transition to next stage
                 }
                 break;
-                
+
             case STAGE_THREE:
                 // Stage 3: Ball 3 goes to Center sensor. If staged, transition to WAITING_TO_SHOOT.
                 // Use lift.up() as it was used in previous logic for this scenario.
-                lift.up(); 
+                //lift.up();
                 separator.stop(); // Center ball staging should stop sorting mechanism
 
                 if (colorSensor.isStagedCenter()) {
                     // All 3 balls staged successfully. Stop motors and wait for shoot command (or auto-trigger).
+                    lift.setIndividualPower(-0.5, -0.5); // Based on old code for staging left
                     intake.stop();
                     lift.stop();
                     separator.stop();
                     autoIntakeState = AutoIntakeState.WAITING_TO_SHOOT;
-                } else if (centerLiftTimer.seconds() > CENTER_LIFT_TIMEOUT_S) {
-                     // Timeout safety break
-                    intake.stop();
-                    lift.stop();
-                    separator.stop();
-                    autoIntakeState = AutoIntakeState.INACTIVE;
-                    telemetry.addData("Auto Intake", "Timed out staging 3rd ball.");
                 }
                 break;
-                
+
             case INACTIVE:
             case WAITING_TO_SHOOT:
                 // Should be handled in runOpMode loop, but stop motors if state persists here somehow
@@ -246,7 +236,7 @@ public class DecodeJava extends LinearOpMode {
                 break;
         }
     }
-    
+
     private void runAutoShoot() {
         // Manual interrupt to stop shooting sequence
         if (gamepad1.y && !yButtonGamepad1_last) {
@@ -262,7 +252,7 @@ public class DecodeJava extends LinearOpMode {
                 shooter.setVelocity(SHOOT_VELOCITY);
                 if (shooter.isAtTargetVelocity()) {
                     autoShootState = AutoShootState.FEED_1ST;
-                    shootTimer.reset(); 
+                    shootTimer.reset();
                 }
                 break;
 
@@ -280,13 +270,13 @@ public class DecodeJava extends LinearOpMode {
                 lift.stop(); separator.stop(); intake.stop();
                 if (shooter.isAtTargetVelocity()) {
                     autoShootState = AutoShootState.FEED_2ND;
-                    shootTimer.reset(); 
+                    shootTimer.reset();
                 }
                 break;
 
             case FEED_2ND:
                 lift.setIndividualPower(1.0, 0); // Based on old code for 2nd ball feed
-                separator.sortLeft(); 
+                separator.sortLeft();
                 intake.in(1.0);
                 if (shootTimer.seconds() > 0.5) {
                     lift.stop(); intake.stop();
@@ -295,19 +285,19 @@ public class DecodeJava extends LinearOpMode {
                 break;
 
             case RECOVER_3RD:
-                lift.stop(); separator.stop(); intake.stop();
+                separator.sortLeft();lift.stop();intake.stop();
                 if (shooter.isAtTargetVelocity()) {
                     autoShootState = AutoShootState.FEED_3RD;
-                    shootTimer.reset(); 
+                    shootTimer.reset();
                 }
                 break;
-                
+
             case FEED_3RD:
-                lift.up();
                 separator.sortLeft();
+                lift.setIndividualPower(0, 1.0);
                 intake.in(1.0);
                 if (shootTimer.seconds() > 1.0) {
-                    lift.stop(); separator.stop(); intake.stop();
+                    lift.stop(); intake.stop();
                     autoShootState = AutoShootState.DONE;
                 }
                 break;
