@@ -135,7 +135,8 @@ public class OmniwheelDrive {
      * @param rotation Clockwise/Counter-clockwise rotation power.
      */
     public void driveRelativeField(double forward, double strafe, double rotation) {
-        double botHeading = imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS);
+        // Add Math.PI (180 degrees) to correct for the Control Hub's new mounting orientation
+        double botHeading = imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS) + Math.PI;
 
         // Rotate the movement vector by the bot's heading
         double robotStrafe = strafe * Math.cos(botHeading) + forward * Math.sin(botHeading);
@@ -168,9 +169,10 @@ public class OmniwheelDrive {
         // Assuming forward is +Y, strafe is +X (right).
 
         // Mecanum kinematics for position:
-        targetLeftFront = left_front.getCurrentPosition() + forwardCounts + strafeCounts;
+        // Note: Left motors are set to REVERSE, so the total displacement is negated.
+        targetLeftFront = left_front.getCurrentPosition() - (forwardCounts + strafeCounts);
         targetRightFront = right_front.getCurrentPosition() + forwardCounts - strafeCounts;
-        targetLeftBack = left_back.getCurrentPosition() + forwardCounts - strafeCounts;
+        targetLeftBack = left_back.getCurrentPosition() - (forwardCounts - strafeCounts);
         targetRightBack = right_back.getCurrentPosition() + forwardCounts + strafeCounts;
 
         // Set Target Position
