@@ -46,7 +46,7 @@ public class DecodeJava extends LinearOpMode {
     private boolean yButtonGamepad1_last = false;
     private ElapsedTime shootTimer = new ElapsedTime();
 
-    private static final double SHOOT_VELOCITY = 1550; // 0.65 * 1800
+    private static final double SHOOT_VELOCITY = 1600; // 0.65 * 1800
     private static final double ARTIFACT_PRESENCE_DISTANCE_CM = 6.0;
 
 
@@ -215,13 +215,12 @@ public class DecodeJava extends LinearOpMode {
 
             case STAGE_THREE:
                 // Stage 3: Ball 3 goes to Center sensor. If staged, transition to WAITING_TO_SHOOT.
-                // Use lift.up() as it was used in previous logic for this scenario.
-                //lift.up();
-                separator.stop(); // Center ball staging should stop sorting mechanism
+                lift.setIndividualPower(0.5, 0.5); // Continue lifting gently for center stage
+                separator.stop(); 
 
                 if (colorSensor.isStagedCenter()) {
                     // All 3 balls staged successfully. Stop motors and wait for shoot command (or auto-trigger).
-                    lift.setIndividualPower(-0.5, -0.5); // Based on old code for staging left
+                    lift.setIndividualPower(-0.5, -0.5); // Run lift briefly in reverse to settle ball
                     intake.stop();
                     lift.stop();
                     separator.stop();
@@ -296,7 +295,7 @@ public class DecodeJava extends LinearOpMode {
                 separator.sortLeft();
                 lift.setIndividualPower(0, 1.0);
                 intake.in(1.0);
-                // CHANGED: Reduced feed time for the 3rd ball from 1.0s to 0.5s for consistent shot distance
+                // The feed time is already 0.5s from a previous correction, which is correct for consistency.
                 if (shootTimer.seconds() > 0.5) { 
                     lift.stop(); intake.stop();
                     autoShootState = AutoShootState.DONE;
