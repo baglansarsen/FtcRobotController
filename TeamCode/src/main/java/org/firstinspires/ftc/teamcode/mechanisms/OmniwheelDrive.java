@@ -54,11 +54,11 @@ public class OmniwheelDrive {
         // Without this, the REV Hub's orientation is assumed to be logo up / USB forward
         imu.initialize(parameters);
 
-        // Set motor directions based on the user's latest configuration:
+        // Set motor directions (STANDARD CONFIGURATION FOR MECANUM: Left REVERSE, Right FORWARD)
         left_front.setDirection(DcMotor.Direction.REVERSE);
-        left_back.setDirection(DcMotor.Direction.REVERSE); // UPDATED
-        right_front.setDirection(DcMotor.Direction.FORWARD); // UPDATED
-        right_back.setDirection(DcMotor.Direction.FORWARD); // UPDATED
+        left_back.setDirection(DcMotor.Direction.REVERSE); 
+        right_front.setDirection(DcMotor.Direction.FORWARD);
+        right_back.setDirection(DcMotor.Direction.FORWARD);
 
         // Set motor zero power behavior to BRAKE by default for Autonomous
         setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
@@ -165,14 +165,17 @@ public class OmniwheelDrive {
         int strafeCounts = (int) (strafeInches * COUNTS_PER_INCH);
 
         // Calculate target positions based on current position and desired movement.
-        // Rotation is currently ignored for simplicity in this basic autonomous function.
-        // Assuming forward is +Y, strafe is +X (right).
-
+        
         // Mecanum kinematics for position:
-        // Note: Left motors are set to REVERSE, so the total displacement is negated.
-        targetLeftFront = left_front.getCurrentPosition() - (forwardCounts + strafeCounts);
-        targetRightFront = right_front.getCurrentPosition() + forwardCounts - strafeCounts;
-        targetLeftBack = left_back.getCurrentPosition() - (forwardCounts - strafeCounts);
+        // LF: REVERSE motor requires subtraction for FWD motion. FLIPPED TO ADDITION (KINEMATIC FIX).
+        targetLeftFront = left_front.getCurrentPosition() + (forwardCounts + strafeCounts); 
+        // RF: FORWARD motor requires addition for FWD motion. (CORRECT)
+        targetRightFront = right_front.getCurrentPosition() + forwardCounts - strafeCounts; 
+        
+        // LB: REVERSE motor requires subtraction for FWD motion. FLIPPED TO ADDITION (KINEMATIC FIX).
+        targetLeftBack = left_back.getCurrentPosition() + (forwardCounts - strafeCounts); 
+        
+        // RB: FORWARD motor requires addition for FWD motion. (CORRECT)
         targetRightBack = right_back.getCurrentPosition() + forwardCounts + strafeCounts;
 
         // Set Target Position

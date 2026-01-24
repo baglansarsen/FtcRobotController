@@ -20,22 +20,10 @@ public class AutonomousMode extends LinearOpMode {
     private enum State {
         INIT,
         DRIVE_FORWARD_1,
-        SPIN_UP_SHOOTER,
-        FEED_1ST,
-        RECOVER_2ND,
-        FEED_2ND,
-        RECOVER_3RD,
-        FEED_3RD,
-        TURN_TO_INTAKE,
-        INTAKE_BALLS,
-        DRIVE_BACK_TO_SHOOT,
-        TURN_TO_SHOOT,
-        SHOOT_COLLECTED_BALLS,
-        RECOVER_COLLECTED_2,
-        SHOOT_COLLECTED_2,
-        RECOVER_COLLECTED_3,
-        SHOOT_COLLECTED_3,
-        DRIVE_STRAFE_2,
+        SHOOT_SEQUENCE, 
+        STOP_SHOOTER,       // New state to stop the shooter
+        DRIVE_STRAFE,       // New state to strafe right
+        TURN_LEFT,          // New state to turn
         DONE
     }
     private State currentState = State.INIT;
@@ -51,19 +39,23 @@ public class AutonomousMode extends LinearOpMode {
     // --- Constants ---
     private static final double DRIVE_POWER = OmniwheelDrive.DRIVE_SPEED;
     private static final double FORWARD_DISTANCE_IN = 60;
-    private static final double STRAFE_DISTANCE_IN = 15;
+    private static final double STRAFE_DISTANCE_IN = 20;
+    private static final double TURN_DEGREES = -145; // right turn
     private static final double SHOOT_VELOCITY = 1170;
     private static final double FEED_TIME_S = 0.3;
     private static final double FEED_TIME_3RD_S = 0.9;
     private static final double SPINUP_TIMEOUT_S = 2.5;
-    private static final double INTAKE_TURN_DEGREES = 135;
-    private static final double INTAKE_DRIVE_SPEED = 0.2;
-    private static final double MAX_INTAKE_DISTANCE_IN = 80; // Search distance
-    private static final double TURN_SPEED = 0.4;
+    private static final double TURN_SPEED = 1;
+    private static final double TURN_TOLERANCE_DEGREES = 5.0; 
 
     private ElapsedTime runtime = new ElapsedTime();
-    private int intakeStartEncoder = 0;
-    private double actualIntakeDistIn = 0;
+    
+    // --- Reusable Sequence States ---
+    private enum ShootState { SPIN_UP, FEED_1ST, RECOVER_2ND, FEED_2ND, RECOVER_3RD, FEED_3RD, COMPLETE }
+    private ShootState currentShootState = ShootState.SPIN_UP;
+    
+    // Flag for clean FSM state transition: ensures a command (drive, turn, feed, etc.) only starts once.
+    private boolean isCommandStarted = false; 
 
     @Override
     public void runOpMode() {
@@ -84,122 +76,52 @@ public class AutonomousMode extends LinearOpMode {
         driveTrain.resetIMU();
         runtime.reset();
         currentState = State.DRIVE_FORWARD_1;
+        currentShootState = ShootState.SPIN_UP; // Initialize shoot sequence state
 
         while (opModeIsActive() && currentState != State.DONE) {
+            // Note: isCommandStarted is reset inside the handler when a command completes.
             switch (currentState) {
                 case DRIVE_FORWARD_1:
-                    handleDrive(FORWARD_DISTANCE_IN, 0, State.SPIN_UP_SHOOTER);
+                    handleDrive(FORWARD_DISTANCE_IN, 0, State.SHOOT_SEQUENCE);
                     break;
 
-                case SPIN_UP_SHOOTER:
-                    handleSpinUp(State.FEED_1ST, SPINUP_TIMEOUT_S);
-                    break;
-
-                case FEED_1ST:
-                    handleFeed(0, 1.0, Separator.Direction.LEFT, FEED_TIME_S, State.RECOVER_2ND);
-                    break;
-
-                case RECOVER_2ND:
-                    handleRecover(State.FEED_2ND);
-                    break;
-
-                case FEED_2ND:
-                    handleFeed(1.0, 0, Separator.Direction.RIGHT, FEED_TIME_S, State.RECOVER_3RD);
-                    break;
-
-                case RECOVER_3RD:
-                    handleRecover(State.FEED_3RD);
-                    break;
-
-                case FEED_3RD:
-                    handleFeed(0, 1.0, Separator.Direction.LEFT, FEED_TIME_3RD_S, State.TURN_TO_INTAKE);
-                    break;
-
-                case TURN_TO_INTAKE:
-                    handleTurn(INTAKE_TURN_DEGREES, State.INTAKE_BALLS);
-                    if (currentState == State.INTAKE_BALLS) {
-                        intakeStartEncoder = driveTrain.getEncoderPosition();
+                case SHOOT_SEQUENCE:
+                    if (shootSequence() == ShootState.COMPLETE) {
+                        currentState = State.STOP_SHOOTER;
                     }
                     break;
 
-                case INTAKE_BALLS:
-                    intake.in(1.0);
-                    // Automatic sorting
-                    if (!colorSensor.isStagedLeft()) {
-                        separator.sortLeft();
-                        lift.setIndividualPower(0.0, 1.0);
-                    } else if (!colorSensor.isStagedRight()) {
-                        separator.sortRight();
-                        lift.setIndividualPower(1.0, 0.0);
-                    } else {
-                        separator.stop();
-                        lift.stop();
-                    }
-
-                    if (driveTrain.getMode() != DcMotor.RunMode.RUN_TO_POSITION) {
-                        driveTrain.driveToPosition(MAX_INTAKE_DISTANCE_IN, 0, INTAKE_DRIVE_SPEED);
-                    }
-
-                    boolean collectedThree = colorSensor.isStagedLeft() && colorSensor.isStagedRight() && colorSensor.isStagedCenter();
-                    if (collectedThree || !driveTrain.isBusy() || isStopRequested()) {
-                        actualIntakeDistIn = (driveTrain.getEncoderPosition() - intakeStartEncoder) / OmniwheelDrive.COUNTS_PER_INCH;
-                        driveTrain.stop();
-                        intake.stop();
-                        lift.stop();
-                        separator.stop();
-                        currentState = State.DRIVE_BACK_TO_SHOOT;
-                    }
+                case STOP_SHOOTER:
+                    shooter.stop();
+                    currentState = State.DRIVE_STRAFE;
+                    break;
+                    
+                case DRIVE_STRAFE:
+                    // Strafe right (positive strafeInches)
+                    handleDrive(0, STRAFE_DISTANCE_IN, State.TURN_LEFT);
                     break;
 
-                case DRIVE_BACK_TO_SHOOT:
-                    handleDrive(-actualIntakeDistIn, 0, State.TURN_TO_SHOOT);
-                    break;
-
-                case TURN_TO_SHOOT:
-                    handleTurn(0, State.SHOOT_COLLECTED_BALLS); // Turn back to 0 degrees
-                    break;
-
-                case SHOOT_COLLECTED_BALLS:
-                    handleFeed(0, 1.0, Separator.Direction.LEFT, FEED_TIME_S, State.RECOVER_COLLECTED_2);
-                    break;
-                
-                case RECOVER_COLLECTED_2:
-                    handleRecover(State.SHOOT_COLLECTED_2);
-                    break;
-                
-                case SHOOT_COLLECTED_2:
-                    handleFeed(1.0, 0, Separator.Direction.RIGHT, FEED_TIME_S, State.RECOVER_COLLECTED_3);
-                    break;
-                
-                case RECOVER_COLLECTED_3:
-                    handleRecover(State.SHOOT_COLLECTED_3);
-                    break;
-                
-                case SHOOT_COLLECTED_3:
-                    // Final shot: run both lifts or just left
-                    handleFeed(0, 1.0, Separator.Direction.LEFT, FEED_TIME_S, State.DRIVE_STRAFE_2);
-                    break;
-
-                case DRIVE_STRAFE_2:
-                    handleDrive(0, STRAFE_DISTANCE_IN, State.DONE);
+                case TURN_LEFT:
+                    handleTurn(TURN_DEGREES, State.DONE);
                     break;
 
                 case INIT:
                 case DONE:
+                    // Stop motion on exit
                     break;
             }
 
             telemetry.addData("Current State", currentState.toString());
-            telemetry.addData("Balls (Staged)", "L:%b R:%b C:%b", 
-                    colorSensor.isStagedLeft(), colorSensor.isStagedRight(), colorSensor.isStagedCenter());
-            telemetry.addData("Distances (CM)", "L:%.1f R:%.1f C:%.1f", 
-                    colorSensor.getDistance(ColorSensorDetector.SensorLocation.LEFT, DistanceUnit.CM),
-                    colorSensor.getDistance(ColorSensorDetector.SensorLocation.RIGHT, DistanceUnit.CM),
-                    colorSensor.getDistance(ColorSensorDetector.SensorLocation.CENTER, DistanceUnit.CM));
+            if (currentState == State.SHOOT_SEQUENCE) {
+                telemetry.addData("Shoot Sub-State", currentShootState.toString());
+            }
             telemetry.addData("Heading", "%.2f", driveTrain.getHeading(AngleUnit.DEGREES));
+            telemetry.addData("Shooter Velocity", "%.2f", shooter.getVelocity());
+            telemetry.addData("Command Started", isCommandStarted); // For debugging
             telemetry.update();
         }
 
+        // Clean shutdown
         driveTrain.stop();
         shooter.stop();
         lift.stop();
@@ -207,42 +129,104 @@ public class AutonomousMode extends LinearOpMode {
         intake.stop();
     }
 
-    private void handleDrive(double forwardInches, double strafeInches, State nextState) {
-        if (driveTrain.getMode() != DcMotor.RunMode.RUN_TO_POSITION) {
-            driveTrain.driveToPosition(forwardInches, strafeInches, DRIVE_POWER);
+    /**
+     * Executes the entire 3-ball shoot sequence.
+     * @return The final state of the sequence (COMPLETE when done).
+     */
+    private ShootState shootSequence() {
+        switch (currentShootState) {
+            case SPIN_UP:
+                handleSpinUp(ShootState.FEED_1ST, SPINUP_TIMEOUT_S);
+                break;
+            case FEED_1ST:
+                handleFeed(0, 1.0, Separator.Direction.LEFT, FEED_TIME_S, ShootState.RECOVER_2ND);
+                break;
+            case RECOVER_2ND:
+                handleRecover(ShootState.FEED_2ND);
+                break;
+            case FEED_2ND:
+                handleFeed(1.0, 0, Separator.Direction.RIGHT, FEED_TIME_S, ShootState.RECOVER_3RD);
+                break;
+            case RECOVER_3RD:
+                handleRecover(ShootState.FEED_3RD);
+                break;
+            case FEED_3RD:
+                // Note: The third feed is longer to ensure it clears the lift mechanism
+                handleFeed(0, 1.0, Separator.Direction.LEFT, FEED_TIME_3RD_S, ShootState.COMPLETE);
+                break;
+            case COMPLETE:
+                // Clean up is handled inside handleFeed, just return the state
+                break;
         }
+        return currentShootState;
+    }
+    
+    // --- Movement/Mechanism Handlers (Used by both AutonomousMode and reusable sequences) ---
+
+    private void handleDrive(double forwardInches, double strafeInches, State nextState) {
+        if (!isCommandStarted) {
+            if (driveTrain.getMode() != DcMotor.RunMode.RUN_USING_ENCODER) {
+                driveTrain.setRunMode(DcMotor.RunMode.RUN_USING_ENCODER);
+            }
+            driveTrain.driveToPosition(forwardInches, strafeInches, DRIVE_POWER);
+            isCommandStarted = true;
+        }
+
         if (!driveTrain.isBusy() || isStopRequested()) {
-            driveTrain.stop();
+            driveTrain.stop(); 
+            isCommandStarted = false; 
             currentState = nextState;
         }
     }
 
     private void handleTurn(double degrees, State nextState) {
-        driveTrain.setRunMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+        if (!isCommandStarted) {
+            driveTrain.setRunMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+            isCommandStarted = true;
+        }
+
+        // Calculate error and normalize it to [-180, 180] for shortest turn path
         double error = degrees - driveTrain.getHeading(AngleUnit.DEGREES);
         while (error > 180)  error -= 360;
         while (error <= -180) error += 360;
+        
+        telemetry.addData("degree", degrees); // For debugging
+        telemetry.addData("Error", error); // For debugging
+        telemetry.addData("headinggg", driveTrain.getHeading(AngleUnit.DEGREES)); // For debugging
 
-        if (Math.abs(error) > 2) {
-            driveTrain.drive(0, 0, Math.signum(error) * TURN_SPEED);
+        if (Math.abs(error) > TURN_TOLERANCE_DEGREES) {
+            // Invert the sign of the applied power because the motor/IMU setup seems to have an inverted direction.
+            driveTrain.drive(0, 0, -Math.signum(error) * TURN_SPEED);
         } else {
             driveTrain.stop();
+            driveTrain.setRunMode(DcMotor.RunMode.RUN_USING_ENCODER);
+            isCommandStarted = false; 
             currentState = nextState;
         }
     }
+    
+    // --- Shoot Sequence Handlers ---
 
-    private void handleSpinUp(State nextState, double timeout) {
-        if (shooter.getVelocity() == 0) {
+    private void handleSpinUp(ShootState nextState, double timeout) {
+        if (!isCommandStarted) {
             shooter.setVelocity(SHOOT_VELOCITY);
             runtime.reset();
+            isCommandStarted = true;
         }
+        
         if (shooter.isAtTargetVelocity() || runtime.seconds() > timeout || isStopRequested()) {
-            currentState = nextState;
+            isCommandStarted = false; 
+            currentShootState = nextState;
             runtime.reset();
         }
     }
 
-    private void handleFeed(double rightLiftPower, double leftLiftPower, Separator.Direction separatorDir, double duration, State nextState) {
+    private void handleFeed(double rightLiftPower, double leftLiftPower, Separator.Direction separatorDir, double duration, ShootState nextState) {
+        if (!isCommandStarted) {
+            runtime.reset();
+            isCommandStarted = true;
+        }
+        
         lift.setIndividualPower(rightLiftPower, leftLiftPower);
         if (separatorDir == Separator.Direction.LEFT) {
             separator.sortLeft();
@@ -257,14 +241,16 @@ public class AutonomousMode extends LinearOpMode {
             lift.stop();
             separator.stop();
             intake.stop();
-            currentState = nextState;
+            isCommandStarted = false; 
+            currentShootState = nextState;
             runtime.reset();
         }
     }
 
-    private void handleRecover(State nextState) {
+    private void handleRecover(ShootState nextState) {
+        // Recovery is just waiting for shooter velocity to be stable again
         if (shooter.isAtTargetVelocity() || isStopRequested()) {
-            currentState = nextState;
+            currentShootState = nextState;
             runtime.reset();
         }
     }

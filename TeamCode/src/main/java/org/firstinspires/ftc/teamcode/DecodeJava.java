@@ -46,7 +46,7 @@ public class DecodeJava extends LinearOpMode {
     private boolean yButtonGamepad1_last = false;
     private ElapsedTime shootTimer = new ElapsedTime();
 
-    private static final double SHOOT_VELOCITY = 1100; // 0.65 * 1800
+    private static final double SHOOT_VELOCITY = 1550; // 0.65 * 1800
     private static final double ARTIFACT_PRESENCE_DISTANCE_CM = 6.0;
 
 
@@ -296,7 +296,8 @@ public class DecodeJava extends LinearOpMode {
                 separator.sortLeft();
                 lift.setIndividualPower(0, 1.0);
                 intake.in(1.0);
-                if (shootTimer.seconds() > 1.0) {
+                // CHANGED: Reduced feed time for the 3rd ball from 1.0s to 0.5s for consistent shot distance
+                if (shootTimer.seconds() > 0.5) { 
                     lift.stop(); intake.stop();
                     autoShootState = AutoShootState.DONE;
                 }
