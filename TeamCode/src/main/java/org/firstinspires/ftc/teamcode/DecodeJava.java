@@ -10,6 +10,8 @@ import org.firstinspires.ftc.teamcode.mechanisms.Separator;
 import org.firstinspires.ftc.teamcode.mechanisms.Shooter;
 import org.firstinspires.ftc.teamcode.mechanisms.Intake;
 import org.firstinspires.ftc.teamcode.mechanisms.Lift;
+import org.firstinspires.ftc.teamcode.mechanisms.WebcamTroubleshooter; // NEW IMPORT
+import org.firstinspires.ftc.vision.apriltag.AprilTagDetection;
 
 import static org.firstinspires.ftc.teamcode.mechanisms.Shooter.TARGET_VELOCITY_COUNTS_PER_SEC;
 
@@ -27,6 +29,7 @@ public class DecodeJava extends LinearOpMode {
     private Shooter shooter = new Shooter();
     private Intake intake = new Intake();
     private Lift lift = new Lift();
+    private WebcamTroubleshooter webcamTroubleshooter = new WebcamTroubleshooter(); // NEW
 
     // Drive mode state
     private boolean isFieldCentric = false;
@@ -46,9 +49,14 @@ public class DecodeJava extends LinearOpMode {
     private boolean yButtonGamepad1_last = false;
     private ElapsedTime shootTimer = new ElapsedTime();
 
-    private static final double SHOOT_VELOCITY = 1600; // 0.65 * 1800
-    private static final double ARTIFACT_PRESENCE_DISTANCE_CM = 6.0;
+    // VELOCITY CONSTANTS AND VARIABLES
+    private static final double SHOOT_VELOCITY_CLOSE = 1170; 
+    private static final double SHOOT_VELOCITY_FAR = 1600;
+    // Removed CM conversion constants
+    private static final double SHOOT_DISTANCE_THRESHOLD_Y_IN = 70.0; // The threshold in INCHES
+    private double currentTargetVelocity = SHOOT_VELOCITY_CLOSE; // Current velocity, starts at default
 
+    private static final double ARTIFACT_PRESENCE_DISTANCE_CM = 6.0;
 
     @Override
     public void runOpMode() {
@@ -58,6 +66,8 @@ public class DecodeJava extends LinearOpMode {
         shooter.init(hardwareMap);
         intake.init(hardwareMap);
         lift.init(hardwareMap);
+        webcamTroubleshooter.init(hardwareMap, telemetry); // NEW INITIALIZATION
+        
         telemetry.addData("Status", "Initialized");
         telemetry.update();
         waitForStart();
@@ -65,6 +75,9 @@ public class DecodeJava extends LinearOpMode {
         if (isStopRequested()) return;
 
         while (opModeIsActive()) {
+            // Determine optimal shooting velocity based on camera before running any sequence
+            currentTargetVelocity = getOptimalShootVelocity();
+
             if (autoShootState != AutoShootState.INACTIVE) {
                 runAutoShoot();
             } else {
@@ -94,6 +107,10 @@ public class DecodeJava extends LinearOpMode {
                 autoModeDisplay = "AUTO INTAKE: " + autoIntakeState.toString();
             }
 
+            // Webcam telemetry
+            webcamTroubleshooter.telemetryOutput(telemetry); // Update webcam data
+            telemetry.addData("Target Velocity", currentTargetVelocity); // Show calculated velocity
+
             telemetry.addData("Auto State", autoModeDisplay);
             telemetry.addData("Balls Staged", ballCount);
             telemetry.addData("Staging Status", "L:%b R:%b C:%b",
@@ -104,6 +121,47 @@ public class DecodeJava extends LinearOpMode {
                     colorSensor.getDistance(ColorSensorDetector.SensorLocation.CENTER, DistanceUnit.CM));
             telemetry.addData("Shooter Ready", shooter.isAtTargetVelocity());
             telemetry.update();
+        }
+        
+        webcamTroubleshooter.stopCamera(); // Clean up camera
+    }
+
+    /**
+     * Determines the optimal shooter velocity based on AprilTag detection distance (Y-axis).
+     * @return The target velocity (1170 or 1600).
+     */
+    private double getOptimalShootVelocity() {
+        // Assume AprilTag goal ID is 10 (common for power-play targets, adjust if needed)
+        final int TARGET_TAG_ID = 10;
+        
+        AprilTagDetection targetDetection = null;
+        if (webcamTroubleshooter.getAprilTagProcessor() != null) {
+            for (AprilTagDetection detection : webcamTroubleshooter.getAprilTagProcessor().getDetections()) {
+                if (detection.id == TARGET_TAG_ID) {
+                    targetDetection = detection;
+                    break;
+                }
+            }
+        }
+        
+        if (targetDetection != null && targetDetection.ftcPose != null) {
+            // ftcPose.y is the distance forward from the camera, in inches.
+            double distanceY_in = targetDetection.ftcPose.y;
+            
+            telemetry.addData("Vision Y (in)", "%.1f", distanceY_in);
+
+            // Compare the distance in inches directly to the inches-based threshold.
+            if (distanceY_in < SHOOT_DISTANCE_THRESHOLD_Y_IN) {
+                // Closer than 70 inches
+                return SHOOT_VELOCITY_CLOSE;
+            } else {
+                // Farther than 70 inches
+                return SHOOT_VELOCITY_FAR;
+            }
+        } else {
+            // Not detected, use default velocity (1170)
+            telemetry.addData("Vision Status", "Goal not detected. Using default velocity.");
+            return SHOOT_VELOCITY_CLOSE;
         }
     }
 
@@ -146,8 +204,8 @@ public class DecodeJava extends LinearOpMode {
             }
         }
 
-        // Manual Shooter Controls
-        if (gamepad1.dpad_up) shooter.setVelocity(SHOOT_VELOCITY); else if (gamepad1.dpad_down) shooter.stop();
+        // Manual Shooter Controls: Use the calculated target velocity
+        if (gamepad1.dpad_up) shooter.setVelocity(currentTargetVelocity); else if (gamepad1.dpad_down) shooter.stop();
 
         // Manual Intake and Sorting Controls (Only if not in auto intake/shoot)
         if (autoIntakeState == AutoIntakeState.INACTIVE && autoShootState == AutoShootState.INACTIVE) {
@@ -248,7 +306,8 @@ public class DecodeJava extends LinearOpMode {
 
         switch (autoShootState) {
             case SPIN_UP:
-                shooter.setVelocity(SHOOT_VELOCITY);
+                // Use the dynamically calculated velocity
+                shooter.setVelocity(currentTargetVelocity);
                 if (shooter.isAtTargetVelocity()) {
                     autoShootState = AutoShootState.FEED_1ST;
                     shootTimer.reset();
@@ -267,6 +326,7 @@ public class DecodeJava extends LinearOpMode {
 
             case RECOVER_2ND:
                 lift.stop(); separator.stop(); intake.stop();
+                // Shooter recovery logic uses the currentTargetVelocity set in SPIN_UP
                 if (shooter.isAtTargetVelocity()) {
                     autoShootState = AutoShootState.FEED_2ND;
                     shootTimer.reset();
@@ -285,6 +345,7 @@ public class DecodeJava extends LinearOpMode {
 
             case RECOVER_3RD:
                 separator.sortLeft();lift.stop();intake.stop();
+                // Shooter recovery logic uses the currentTargetVelocity set in SPIN_UP
                 if (shooter.isAtTargetVelocity()) {
                     autoShootState = AutoShootState.FEED_3RD;
                     shootTimer.reset();
@@ -295,7 +356,7 @@ public class DecodeJava extends LinearOpMode {
                 separator.sortLeft();
                 lift.setIndividualPower(0, 1.0);
                 intake.in(1.0);
-                // The feed time is already 0.5s from a previous correction, which is correct for consistency.
+                // The feed time is 0.5s for consistency.
                 if (shootTimer.seconds() > 0.5) { 
                     lift.stop(); intake.stop();
                     autoShootState = AutoShootState.DONE;

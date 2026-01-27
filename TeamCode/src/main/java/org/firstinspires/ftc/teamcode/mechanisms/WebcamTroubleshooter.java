@@ -54,7 +54,7 @@ public class WebcamTroubleshooter {
         for (AprilTagDetection detection : currentDetections) {
             if (detection.metadata != null) {
                 telemetry.addLine(String.format("\n==== (ID %d) %s", detection.id, detection.metadata.name));
-                telemetry.addLine(String.format("XYZ (in):  %.1f, %.1f, %.1f", detection.ftcPose.x, detection.ftcPose.y, detection.ftcPose.z));
+                telemetry.addLine(String.format("XYZ (in):  %.1f, %.1f, %.1f", detection.ftcPose.x, detection.ftcPose.y, detection.ftcPose.y));
                 telemetry.addLine(String.format("RBE (deg): %.1f, %.1f, %.1f", detection.ftcPose.roll, detection.ftcPose.bearing, detection.ftcPose.elevation));
             } else {
                 telemetry.addLine(String.format("\n==== (ID %d) Unknown", detection.id));
@@ -63,6 +63,13 @@ public class WebcamTroubleshooter {
         }
         
         telemetry.addData("Camera State", visionPortal.getCameraState());
+    }
+
+    /**
+     * Getter for the AprilTagProcessor to allow OpModes to access detection data.
+     */
+    public AprilTagProcessor getAprilTagProcessor() {
+        return aprilTag;
     }
 
     /**
