@@ -273,10 +273,8 @@ public class DecodeJava extends LinearOpMode {
 
             case STAGE_THREE:
                 // Stage 3: Ball 3 goes to Center sensor. If staged, transition to WAITING_TO_SHOOT.
-                lift.setIndividualPower(0.5, 0.5); // Continue lifting gently for center stage
-                separator.stop(); 
-
-                if (colorSensor.isStagedCenter()) {
+               separator.stop();
+               if (colorSensor.isStagedCenter()) {
                     // All 3 balls staged successfully. Stop motors and wait for shoot command (or auto-trigger).
                     lift.setIndividualPower(-0.5, -0.5); // Run lift briefly in reverse to settle ball
                     intake.stop();

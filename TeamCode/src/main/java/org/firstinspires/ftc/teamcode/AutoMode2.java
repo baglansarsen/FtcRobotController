@@ -5,15 +5,15 @@ import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.util.ElapsedTime;
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
-import org.firstinspires.ftc.teamcode.mechanisms.OmniwheelDrive;
-import org.firstinspires.ftc.teamcode.mechanisms.Shooter;
-import org.firstinspires.ftc.teamcode.mechanisms.Lift;
-import org.firstinspires.ftc.teamcode.mechanisms.Separator;
-import org.firstinspires.ftc.teamcode.mechanisms.Intake;
 import org.firstinspires.ftc.teamcode.mechanisms.ColorSensorDetector;
+import org.firstinspires.ftc.teamcode.mechanisms.Intake;
+import org.firstinspires.ftc.teamcode.mechanisms.Lift;
+import org.firstinspires.ftc.teamcode.mechanisms.OmniwheelDrive;
+import org.firstinspires.ftc.teamcode.mechanisms.Separator;
+import org.firstinspires.ftc.teamcode.mechanisms.Shooter;
 
-@Autonomous(name = "near blue", group = "Main")
-public class AutonomousMode extends LinearOpMode {
+@Autonomous(name = "near red", group = "Main")
+public class AutoMode2 extends LinearOpMode {
 
     // --- FSM States ---
     private enum State {
@@ -37,7 +37,7 @@ public class AutonomousMode extends LinearOpMode {
     // --- Constants ---
     private static final double DRIVE_POWER = OmniwheelDrive.DRIVE_SPEED;
     private static final double FORWARD_DISTANCE_IN = 60;
-    private static final double STRAFE_DISTANCE_IN = 30;
+    private static final double STRAFE_DISTANCE_IN = -30;
 
     private static final double SHOOT_VELOCITY = 1150;
     private static final double FEED_TIME_S = 0.3;

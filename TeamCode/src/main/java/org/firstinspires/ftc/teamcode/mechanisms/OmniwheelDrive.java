@@ -235,6 +235,14 @@ public class OmniwheelDrive {
     }
 
     /**
+     * Gets the number of inches the robot moves per encoder tick (count).
+     * @return Inches per tick.
+     */
+    public double getInchesPerTick() {
+        return 1.0 / COUNTS_PER_INCH;
+    }
+
+    /**
      * Stop all motors by setting all drive power to zero.
      */
     public void stop() {
